@@ -1,0 +1,110 @@
+# Unit tests for the alert rules in k8s/prometheusrule.yaml.
+# Run:  scripts/test-alerts.sh   (extracts the rules, then: promtool test rules)
+#
+# Each test feeds Prometheus synthetic series sampled every 15s and asserts
+# exactly which alerts are firing at a point in time. 5 req/s = +75 per sample.
+
+rule_files:
+  - rules.generated.yaml
+
+evaluation_interval: 15s
+
+tests:
+  # Healthy service: no alerts at all.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p1"}'
+        values: '1x80'
+      - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p2"}'
+        values: '1x80'
+      - series: 'agent_requests_total{job="agentic-gp",endpoint="/agent",status="200"}'
+        values: '0+75x80'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="0.25"}'
+        values: '0+75x80'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="+Inf"}'
+        values: '0+75x80'
+    alert_rule_test:
+      - {eval_time: 15m, alertname: AgentHighErrorRate, exp_alerts: []}
+      - {eval_time: 15m, alertname: AgentErrorBudgetBurn, exp_alerts: []}
+      - {eval_time: 15m, alertname: AgentHighLatencyP95, exp_alerts: []}
+      - {eval_time: 15m, alertname: AgentAllReplicasDown, exp_alerts: []}
+      - {eval_time: 15m, alertname: AgentReplicaDown, exp_alerts: []}
+
+  # chaos.sh errors: 30% of requests fail.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p1"}'
+        values: '1x80'
+      - series: 'agent_requests_total{job="agentic-gp",endpoint="/agent",status="200"}'
+        values: '0+52x80'
+      - series: 'agent_requests_total{job="agentic-gp",endpoint="/agent",status="500"}'
+        values: '0+23x80'
+    alert_rule_test:
+      # Not yet: the 2-minute "for" has not elapsed.
+      - {eval_time: 2m, alertname: AgentHighErrorRate, exp_alerts: []}
+      - eval_time: 10m
+        alertname: AgentHighErrorRate
+        exp_alerts:
+          - exp_labels: {namespace: agentic-gp, severity: critical}
+            exp_annotations:
+              summary: "agentic-gp /agent error rate is 30.67%"
+              description: "More than 5% of /agent requests returned 5xx over the last 5 minutes."
+      - eval_time: 10m
+        alertname: AgentErrorBudgetBurn
+        exp_alerts:
+          - exp_labels: {namespace: agentic-gp, severity: warning}
+            exp_annotations:
+              summary: "agentic-gp is burning its error budget 14x too fast"
+              description: "At this rate the 30-day error budget is gone in about 2 days."
+
+  # chaos.sh latency: every request takes 1-1.5s.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p1"}'
+        values: '1x80'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="1"}'
+        values: '0x80'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="1.5"}'
+        values: '0+75x80'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="+Inf"}'
+        values: '0+75x80'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AgentHighLatencyP95
+        exp_alerts:
+          - exp_labels: {namespace: agentic-gp, severity: warning}
+            exp_annotations:
+              summary: "agentic-gp p95 latency is 1.475s"
+              description: "95th percentile /agent latency has been above the 1s SLO for 2 minutes."
+
+  # chaos.sh outage: no pods, so no "up" series at all.
+  - interval: 15s
+    input_series:
+      - series: 'agent_requests_total{job="agentic-gp",endpoint="/agent",status="200"}'
+        values: '0x20'
+    alert_rule_test:
+      - {eval_time: 30s, alertname: AgentAllReplicasDown, exp_alerts: []}
+      - eval_time: 2m
+        alertname: AgentAllReplicasDown
+        exp_alerts:
+          - exp_labels: {namespace: agentic-gp, severity: critical}
+            exp_annotations:
+              summary: "agentic-gp has no healthy pods"
+              description: "No agentic-gp pod has been reachable for more than 1 minute."
+
+  # One pod stops answering scrapes while the other keeps serving.
+  - interval: 15s
+    input_series:
+      - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p1"}'
+        values: '1x20'
+      - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p2"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AgentReplicaDown
+        exp_alerts:
+          - exp_labels: {job: agentic-gp, namespace: agentic-gp, pod: p2, severity: warning}
+            exp_annotations:
+              summary: "agentic-gp pod p2 is down"
+              description: "Prometheus cannot scrape p2 for more than 1 minute."
+      - {eval_time: 3m, alertname: AgentAllReplicasDown, exp_alerts: []}

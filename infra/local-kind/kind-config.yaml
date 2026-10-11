@@ -1,0 +1,17 @@
+# Fallback for machines without Terraform: the same cluster as main.tf.
+#   kind create cluster --config infra/local-kind/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: agentic-gp
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.31.0
+    extraPortMappings:
+      - containerPort: 30090 # app
+        hostPort: 8090
+        protocol: TCP
+      - containerPort: 30030 # Grafana
+        hostPort: 3030
+        protocol: TCP
+  - role: worker
+    image: kindest/node:v1.31.0

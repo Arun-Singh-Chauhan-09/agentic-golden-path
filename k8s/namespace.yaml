@@ -1,0 +1,12 @@
+# The namespace enforces the Kubernetes "restricted" Pod Security Standard:
+# the API server itself rejects any pod that runs as root, keeps Linux
+# capabilities, or allows privilege escalation. Policy in CI (conftest) and
+# enforcement in the cluster (PSA) check the same rules from both ends.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentic-gp
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted

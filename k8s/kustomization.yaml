@@ -1,0 +1,39 @@
+# Everything ArgoCD deploys for the app, rendered with:  kubectl kustomize k8s
+#
+# The image tag below is the single source of truth for "what version runs".
+# The release workflow bumps newTag on every vX.Y.Z tag and commits it;
+# ArgoCD notices the commit and rolls the Deployment. That is GitOps: the
+# cluster follows git, nobody runs kubectl apply by hand.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agentic-gp
+
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+  - servicemonitor.yaml
+  - prometheusrule.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: agentic-golden-path
+    includeSelectors: false
+
+images:
+  - name: agentic-gp
+    newName: ghcr.io/arun-singh-chauhan-09/agentic-golden-path
+    newTag: 0.2.0
+
+# Grafana's sidecar picks up any ConfigMap labelled grafana_dashboard=1,
+# so the dashboard ships with the app instead of being clicked together.
+configMapGenerator:
+  - name: agentic-gp-dashboard
+    files:
+      - dashboards/agentic-gp.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

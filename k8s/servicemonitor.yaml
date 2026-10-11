@@ -1,0 +1,16 @@
+# Tells the Prometheus Operator to scrape the app. The scrape job is named
+# after the Service, so every query and alert uses job="agentic-gp".
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: agentic-gp
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: agentic-gp
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

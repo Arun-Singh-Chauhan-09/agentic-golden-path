@@ -1,0 +1,31 @@
+# ArgoCD watches the k8s/ folder on main and keeps the cluster equal to it.
+#   prune: true     -> resources deleted from git are deleted from the cluster
+#   selfHeal: true  -> manual kubectl edits are reverted (drift correction)
+#
+# Change repoURL if you fork or rename the repository.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agentic-gp
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Arun-Singh-Chauhan-09/agentic-golden-path.git
+    targetRevision: main
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agentic-gp
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

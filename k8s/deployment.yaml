@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentic-gp
+  labels:
+    app: agentic-gp
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0 # never drop below desired capacity during a rollout
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: agentic-gp
+  template:
+    metadata:
+      labels:
+        app: agentic-gp
+    spec:
+      automountServiceAccountToken: false # the app never talks to the K8s API
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: agentic-gp # rewritten by kustomize (see kustomization.yaml)
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: MOCK_LLM
+              value: "true"
+            # Chaos knobs, off by default. scripts/chaos.sh flips them.
+            - name: FAILURE_RATE
+              value: "0"
+            - name: EXTRA_LATENCY_MS
+              value: "0"
+          livenessProbe: # restart the container if the process hangs
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe: # only send traffic once dependencies are ready
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp # writable scratch space; root fs stays read-only
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

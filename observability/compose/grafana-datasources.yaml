@@ -1,0 +1,9 @@
+# Grafana datasource provisioning for the Docker Compose stack.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus # same uid as in Kubernetes, so the dashboard is portable
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true

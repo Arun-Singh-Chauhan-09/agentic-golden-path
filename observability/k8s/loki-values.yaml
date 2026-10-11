@@ -1,0 +1,22 @@
+# Helm values for grafana/loki-stack: Loki stores logs, Promtail runs on
+# every node and tails pod stdout from /var/log/pods.
+#   helm upgrade --install loki grafana/loki-stack -n monitoring -f observability/k8s/loki-values.yaml
+#
+# loki-stack is deprecated upstream but is the simplest one-chart install for
+# a laptop. Production would use the grafana/loki chart with object storage
+# and Grafana Alloy instead of Promtail.
+loki:
+  persistence:
+    enabled: false
+promtail:
+  enabled: true
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+  sidecar:
+    datasources:
+      # Don't create a second "Loki" datasource. kube-prometheus-stack already
+      # provisions one with the fixed uid "loki" that the dashboard uses;
+      # two datasources with the same name stop Grafana from starting.
+      enabled: false

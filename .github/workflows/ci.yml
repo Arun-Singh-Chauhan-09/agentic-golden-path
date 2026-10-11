@@ -1,0 +1,189 @@
+name: ci
+
+# Runs on every pull request and on pushes to main.
+# Everything here works without an AWS account. The only AWS-dependent job
+# (terraform plan) is skipped unless the repository variable AWS_ENABLED is
+# set to "true" (Settings -> Secrets and variables -> Actions -> Variables).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  lint-test:
+    name: App lint & tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements*.txt
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Ruff
+        run: python -m ruff check .
+      - name: Pytest
+        run: python -m pytest -q
+
+  build-scan:
+    name: Image build & Trivy scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --build-arg VERSION=ci-${{ github.sha }} -t agentic-gp:${{ github.sha }} app
+      - name: Trivy (fail on fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: agentic-gp:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+  secrets-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  terraform-static:
+    name: Terraform fmt / validate / Checkov
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        root: [infra/envs/dev, infra/envs/prod, infra/local-kind]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: terraform fmt
+        run: terraform fmt -check -recursive infra
+      - name: terraform validate (${{ matrix.root }})
+        run: |
+          terraform -chdir=${{ matrix.root }} init -backend=false -input=false
+          terraform -chdir=${{ matrix.root }} validate
+      - name: Checkov (report only)
+        # Reported, not blocking: the demo deliberately defers HTTPS/WAF/access
+        # logging (see README "Intentionally simplified"). The blocking gate is
+        # the Conftest policy below, which encodes the rules we enforce.
+        if: matrix.root == 'infra/envs/dev'
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra
+          framework: terraform
+          quiet: true
+          soft_fail: true
+
+  policy:
+    name: Policy tests (Conftest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install conftest
+        run: curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz | sudo tar xz -C /usr/local/bin conftest
+      - name: Rego formatting
+        run: conftest fmt --check policy
+      - name: Unit-test the policies themselves
+        run: conftest verify --policy policy
+
+  k8s-static:
+    name: Kubernetes manifests (kubeconform + policy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install conftest
+        run: curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz | sudo tar xz -C /usr/local/bin conftest
+      - name: Render manifests (kustomize)
+        run: kubectl kustomize k8s > rendered.yaml
+      - name: Schema validation (kubeconform)
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          ./kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            rendered.yaml
+      - name: Security policy (runAsNonRoot, limits, probes, pinned tags)
+        run: conftest test --policy policy --namespace k8s rendered.yaml
+
+  alert-rules:
+    name: Alert rules (promtool + amtool)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: Install promtool and amtool
+        run: |
+          curl -fsSL https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin --strip-components=1 prometheus-2.54.1.linux-amd64/promtool
+          curl -fsSL https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin --strip-components=1 alertmanager-0.27.0.linux-amd64/amtool
+      - name: Check rules, unit-test alerts, check Alertmanager config
+        run: ./scripts/test-alerts.sh
+
+  shellcheck:
+    name: Shell scripts (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -x scripts/*.sh
+
+  plan:
+    name: AWS plan & policy gate
+    if: vars.AWS_ENABLED == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [lint-test, terraform-static, policy]
+    permissions:
+      contents: read
+      id-token: write # OIDC: no long-lived AWS keys in the repo
+    env:
+      TF_ENV_DIR: infra/envs/dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Install conftest
+        run: curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz | sudo tar xz -C /usr/local/bin conftest
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Terraform plan
+        run: |
+          terraform -chdir=$TF_ENV_DIR init -input=false
+          terraform -chdir=$TF_ENV_DIR plan -input=false -out=tf.plan -var="image_tag=${{ github.sha }}"
+          terraform -chdir=$TF_ENV_DIR show -json tf.plan > plan.json
+      - name: Policy gate
+        run: conftest test --policy policy --namespace main plan.json
+      - name: Plan summary
+        run: |
+          {
+            echo "### Terraform plan (dev)"
+            echo '```'
+            terraform -chdir=$TF_ENV_DIR show -no-color tf.plan | tail -n 40
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

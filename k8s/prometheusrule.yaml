@@ -1,0 +1,90 @@
+# Alerts for the agent service, versioned and deployed with the app (ArgoCD
+# syncs them), so changing an SLO goes through a pull request like code.
+#
+# SLO: 99.5% of /agent requests succeed (error budget 0.5%) and p95 < 1s.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: agentic-gp
+  labels:
+    release: monitoring
+spec:
+  groups:
+    # --- recording rules: compute the SLI once, reuse it everywhere -------
+    - name: agentic-gp.sli
+      rules:
+        - record: agentic_gp:agent_error_ratio:rate5m
+          expr: |
+            sum(rate(agent_requests_total{job="agentic-gp",endpoint="/agent",status=~"5.."}[5m]))
+            /
+            sum(rate(agent_requests_total{job="agentic-gp",endpoint="/agent"}[5m]))
+        - record: agentic_gp:agent_error_ratio:rate1h
+          expr: |
+            sum(rate(agent_requests_total{job="agentic-gp",endpoint="/agent",status=~"5.."}[1h]))
+            /
+            sum(rate(agent_requests_total{job="agentic-gp",endpoint="/agent"}[1h]))
+        - record: agentic_gp:agent_latency_p95:rate5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent"}[5m])))
+
+    # --- availability: are the pods there at all? -------------------------
+    - name: agentic-gp.availability
+      rules:
+        - alert: AgentReplicaDown
+          expr: up{job="agentic-gp"} == 0
+          for: 1m
+          labels:
+            namespace: agentic-gp
+            severity: warning
+          annotations:
+            summary: "agentic-gp pod {{ $labels.pod }} is down"
+            description: "Prometheus cannot scrape {{ $labels.pod }} for more than 1 minute."
+        - alert: AgentAllReplicasDown
+          expr: absent(up{job="agentic-gp"} == 1)
+          for: 1m
+          labels:
+            namespace: agentic-gp
+            severity: critical
+          annotations:
+            summary: "agentic-gp has no healthy pods"
+            description: "No agentic-gp pod has been reachable for more than 1 minute."
+
+    # --- SLO: is it working well enough for users? ------------------------
+    - name: agentic-gp.slo
+      rules:
+        - alert: AgentHighErrorRate
+          # Fast, simple signal: >5% of requests failing for 2 minutes.
+          expr: agentic_gp:agent_error_ratio:rate5m > 0.05
+          for: 2m
+          labels:
+            namespace: agentic-gp
+            severity: critical
+          annotations:
+            summary: "agentic-gp /agent error rate is {{ $value | humanizePercentage }}"
+            description: "More than 5% of /agent requests returned 5xx over the last 5 minutes."
+        - alert: AgentErrorBudgetBurn
+          # Multi-window burn rate (Google SRE workbook): both the 1h and the
+          # 5m window must burn the 0.5% budget 14.4x faster than allowed.
+          # The 1h window proves it is sustained; the 5m window proves it is
+          # still happening, so the alert clears quickly after a fix.
+          expr: |
+            agentic_gp:agent_error_ratio:rate1h > (14.4 * 0.005)
+            and
+            agentic_gp:agent_error_ratio:rate5m > (14.4 * 0.005)
+          for: 2m
+          labels:
+            namespace: agentic-gp
+            severity: warning
+          annotations:
+            summary: "agentic-gp is burning its error budget 14x too fast"
+            description: "At this rate the 30-day error budget is gone in about 2 days."
+        - alert: AgentHighLatencyP95
+          expr: agentic_gp:agent_latency_p95:rate5m > 1
+          for: 2m
+          labels:
+            namespace: agentic-gp
+            severity: warning
+          annotations:
+            summary: "agentic-gp p95 latency is {{ $value | humanizeDuration }}"
+            description: "95th percentile /agent latency has been above the 1s SLO for 2 minutes."

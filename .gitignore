@@ -1,0 +1,38 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+tf.plan
+plan.json
+plan.txt
+override.tf
+override.tf.json
+*_override.tf
+.terraformrc
+terraform.rc
+
+# kind / Kubernetes: generated kubeconfigs hold cluster credentials
+infra/local-kind/*-config
+*.kubeconfig
+rendered.yaml
+observability/tests/rules.generated.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets — never commit these
+*.env
+.env
+*.pem
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

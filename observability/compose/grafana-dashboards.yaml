@@ -1,0 +1,9 @@
+# Grafana dashboard provisioning for the Docker Compose stack: loads every
+# JSON file in /var/lib/grafana/dashboards (mounted from k8s/dashboards).
+apiVersion: 1
+providers:
+  - name: agentic-gp
+    folder: Agentic Golden Path
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
