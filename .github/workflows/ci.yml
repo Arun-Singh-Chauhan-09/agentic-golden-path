@@ -24,13 +24,13 @@ env:
 jobs:
   lint-test:
     name: App lint & tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -43,41 +43,49 @@ jobs:
 
   build-scan:
     name: Image build & Trivy scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build image
         run: docker build --build-arg VERSION=ci-${{ github.sha }} -t agentic-gp:${{ github.sha }} app
+      - name: Install Trivy (pinned binary, checksum-verified)
+        # Not the trivy-action: its tags were hijacked in March 2026
+        # (GHSA-69fq-xp46-6x23). A pinned binary whose SHA-256 is checked
+        # here fails the build if the download was ever tampered with.
+        env:
+          TRIVY_VERSION: "0.69.3"
+          TRIVY_SHA256: "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75"
+        run: |
+          curl -fsSLo trivy.tgz "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tgz" | sha256sum -c -
+          sudo tar xzf trivy.tgz -C /usr/local/bin trivy
+          trivy --version
       - name: Trivy (fail on fixable HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: agentic-gp:${{ github.sha }}
-          format: table
-          exit-code: "1"
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
+        run: |
+          trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
+            --format table agentic-gp:${{ github.sha }}
 
   secrets-scan:
     name: Secret scan (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   terraform-static:
     name: Terraform fmt / validate / Checkov
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         root: [infra/envs/dev, infra/envs/prod, infra/local-kind]
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
       - name: terraform fmt
         run: terraform fmt -check -recursive infra
       - name: terraform validate (${{ matrix.root }})
@@ -89,7 +97,7 @@ jobs:
         # logging (see README "Intentionally simplified"). The blocking gate is
         # the Conftest policy below, which encodes the rules we enforce.
         if: matrix.root == 'infra/envs/dev'
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@d0dd2e9434b4428060edba72d050c135273bd677 # v12.3132.0
         with:
           directory: infra
           framework: terraform
@@ -98,9 +106,9 @@ jobs:
 
   policy:
     name: Policy tests (Conftest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install conftest
         run: curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz | sudo tar xz -C /usr/local/bin conftest
       - name: Rego formatting
@@ -110,9 +118,9 @@ jobs:
 
   k8s-static:
     name: Kubernetes manifests (kubeconform + policy)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install conftest
         run: curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz | sudo tar xz -C /usr/local/bin conftest
       - name: Render manifests (kustomize)
@@ -129,10 +137,10 @@ jobs:
 
   alert-rules:
     name: Alert rules (promtool + amtool)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - run: pip install pyyaml
@@ -147,15 +155,15 @@ jobs:
 
   shellcheck:
     name: Shell scripts (shellcheck)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: shellcheck -x scripts/*.sh
 
   plan:
     name: AWS plan & policy gate
     if: vars.AWS_ENABLED == 'true' && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [lint-test, terraform-static, policy]
     permissions:
       contents: read
@@ -163,12 +171,12 @@ jobs:
     env:
       TF_ENV_DIR: infra/envs/dev
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
       - name: Install conftest
         run: curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz | sudo tar xz -C /usr/local/bin conftest
       - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}

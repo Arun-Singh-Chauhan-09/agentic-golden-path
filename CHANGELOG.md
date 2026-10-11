@@ -6,6 +6,16 @@ and [Semantic Versioning](https://semver.org/). Releases are cut by pushing a
 image and moves the GitOps pointer.
 
 ## [Unreleased]
+### Security
+- Replaced `aquasecurity/trivy-action` with a pinned Trivy 0.69.3 binary whose
+  SHA-256 is verified in CI. The action's tags were hijacked in March 2026
+  (GHSA-69fq-xp46-6x23) and the old tags were deleted.
+- Pinned every GitHub Action to a full commit SHA (with the version as a
+  comment), so a moved tag cannot change what runs.
+- Pinned runners to `ubuntu-24.04` instead of the moving `ubuntu-latest`.
+- Upgraded FastAPI to 0.143.0 so Starlette resolves to a release with the
+  2025-2026 security fixes (e.g. CVE-2025-62727, CVE-2026-48710).
+- Added Dependabot for actions, pip, the Docker base image and Terraform.
 
 ## [0.2.0] - 2026-10-11
 ### Added
