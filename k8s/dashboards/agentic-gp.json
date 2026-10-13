@@ -340,7 +340,7 @@
           "legendFormat": "p95"
         },
         {
-          "refId": "A",
+          "refId": "B",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
