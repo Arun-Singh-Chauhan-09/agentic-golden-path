@@ -26,7 +26,7 @@ It runs on two tracks that share the same app, image, dashboard and policies:
 
 ```mermaid
 graph LR
-    dev["git tag v0.3.0"] --> rel["release.yml<br/>build image, SBOM, provenance"]
+    dev["git tag vX.Y.Z"] --> rel["release.yml<br/>build image, SBOM, provenance"]
     rel -->|push| ghcr["GHCR"]
     rel -->|commit newTag| repo["k8s/ on main"]
     repo -->|watches| argo["ArgoCD<br/>auto-sync, self-heal"]
@@ -83,6 +83,12 @@ touched.
 `make k8s-status` shows pods, the running image, ArgoCD sync state and the
 alerts firing right now. `make k8s-down` deletes the cluster.
 
+After a reboot the kind nodes start again with Docker, but port-forwards do
+not survive. Run `make k8s-up` again: it is idempotent, so it
+leaves the running cluster as it is and restarts the port-forwards. To pause the cluster without losing anything:
+`docker stop agentic-gp-control-plane agentic-gp-worker` (and `docker start`
+to resume).
+
 ### The 10-minute demo
 
 ```bash
@@ -108,18 +114,108 @@ make chaos-off
 `kubectl --context kind-agentic-gp -n agentic-gp scale deploy/agentic-gp --replicas=5`
 and watch ArgoCD put it back to 2 within seconds. Git is the source of truth.
 
+#### What the chaos targets do
+
+Every target runs `scripts/chaos.sh <mode>`, which uses the same pinned
+kubectl context:
+
+| Target | What it changes | What you should see |
+|---|---|---|
+| `chaos-errors` | self-heal off, `FAILURE_RATE=0.3` | AgentHighErrorRate (critical) after ~2-3 min |
+| `chaos-latency` | self-heal off, `EXTRA_LATENCY_MS=1500` | AgentHighLatencyP95 (warning) |
+| `chaos-kill` | deletes one pod | replacement pod, no alert (the other pod keeps serving) |
+| `chaos-outage` | self-heal off, replicas 0 | AgentAllReplicasDown (critical) after ~1 min |
+| `chaos-off` | knobs to 0, replicas 2, self-heal on | alerts resolve once the 5 m windows are clean |
+
+Self-heal has to be paused first: otherwise ArgoCD sees that the cluster no
+longer matches Git and undoes the change within seconds, so no alert fires.
+
+#### The outage drill by hand
+
+The same thing `make chaos-outage` / `make chaos-off` do, step by step:
+
+```bash
+# 1. pause GitOps self-heal
+kubectl --context kind-agentic-gp patch application agentic-gp -n argocd --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":false}}}}'
+
+# 2. take the app down: localhost:9090/alerts goes INACTIVE -> PENDING -> FIRING
+kubectl --context kind-agentic-gp scale deploy/agentic-gp -n agentic-gp --replicas=0
+
+# 3. localhost:9093: AgentAllReplicasDown routed to the "critical" receiver;
+#    inhibition hides the per-pod and SLO warnings it implies
+
+# 4. recover and hand control back to Git
+kubectl --context kind-agentic-gp scale deploy/agentic-gp -n agentic-gp --replicas=2
+kubectl --context kind-agentic-gp patch application agentic-gp -n argocd --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true}}}}'
+```
+
+### Query it
+
+In Grafana → **Explore**, pick the data source, switch the editor from
+*Builder* to *Code*, paste a query and press Shift+Enter. Run `make k8s-load`
+first so there is traffic.
+
+**Prometheus (metrics)**
+
+```promql
+up{job="agentic-gp"}                                                            # per-pod liveness
+sum(rate(agent_requests_total{job="agentic-gp"}[5m]))                           # requests/s
+sum by (pod) (rate(agent_requests_total{job="agentic-gp"}[5m]))                 # requests/s per pod
+sum by (status) (rate(agent_requests_total{job="agentic-gp",handler="/agent"}[5m]))  # 200 vs 500
+agentic_gp:agent_error_ratio:rate5m                                             # SLI: error ratio
+agentic_gp:agent_latency_p95:rate5m                                             # SLI: p95 latency (s)
+agent_build_info{job="agentic-gp"}                                              # version per pod
+```
+
+**Loki (logs)**
+
+```logql
+{namespace="agentic-gp"}                                         # everything
+{namespace="agentic-gp"} |= "{" | json                           # JSON request logs, parsed
+{namespace="agentic-gp"} |= "{" | json | latency_ms > 200        # slow requests
+{namespace="agentic-gp"} |= "{" | json | status >= 500           # failed requests
+sum by (pod) (count_over_time({namespace="agentic-gp"} |= "{" | json [1m]))  # lines/min per pod
+```
+
+`|= "{"` keeps only the app's JSON lines and skips uvicorn's plain-text
+access log. Health checks and scrapes are not logged on purpose.
+
 ### Shipping a version
 
 ```bash
-make release VERSION=0.3.0
+git pull
+# change code, then:
+make test
+git add . && git commit -m "feat: ..." && git push     # CI runs on main
+# wait for CI to be green (GitHub -> Actions -> ci), then:
+git tag v0.3.2 && git push origin v0.3.2                # or: make release VERSION=0.3.2
+git pull                                                # fetch the bot's newTag commit
+curl -s localhost:8090/health                           # "version":"0.3.2" after the rollout
 ```
 
-The tag triggers `release.yml`: it builds the image with an SBOM and
-provenance attestation, pushes it to GHCR, commits the new tag to
-`k8s/kustomization.yaml`, and creates a GitHub Release. ArgoCD sees the
-commit and rolls the Deployment (`maxUnavailable: 0`, so capacity never
-drops). Make the GHCR package public once (GitHub → Packages → Package
-settings) so the cluster can pull it.
+```
+git push origin vX.Y.Z
+  |
+  v
+release.yml: build image (+ SBOM, provenance) -> push to GHCR
+  |
+  v
+bot commits newTag: X.Y.Z in k8s/kustomization.yaml -> GitHub Release
+  |
+  v
+ArgoCD polls Git (~3 min, or "Refresh" in the UI) -> OutOfSync -> auto-sync
+  |
+  v
+rolling update: a new pod must pass /ready before an old one stops
+```
+
+`maxUnavailable: 0` plus the readiness probe mean capacity never drops during
+the rollout, and `agent_build_info` shows both versions side by side while it
+runs. A version number can be tagged only once. If new pods sit in
+`ImagePullBackOff`, the GHCR package is private: make it public once
+(GitHub → Packages → Package settings → Change visibility).
 
 ---
 
@@ -169,7 +265,20 @@ Environment approval.
 
 ---
 
-## CI: what every pull request checks
+## CI/CD: what runs when
+
+| Event | Workflow | What it does |
+|---|---|---|
+| push or pull request to `main` | `ci.yml` | every check in the table below |
+| push a `vX.Y.Z` tag | `release.yml` | image to GHCR, `newTag` commit, GitHub Release |
+| change in `k8s/` on `main` | ArgoCD (in the cluster) | pulls and applies it: **pull-based CD**, CI never holds cluster credentials |
+| push to `main` or manual run | `deploy.yml` | AWS: OIDC role → ECR → `terraform apply` → ECS → smoke test (only with `AWS_ENABLED`) |
+
+A tag push runs only `release.yml`, not CI, so push the code to `main` and
+let CI pass before tagging. The bot's own commit does not trigger new
+workflow runs.
+
+### CI checks
 
 | Job | Blocks merge on |
 |---|---|
@@ -224,8 +333,29 @@ fails CI instead of failing silently in production.
 The SLIs are recording rules, computed once and reused by alerts and
 dashboards. Alertmanager inhibition keeps it to one page per incident: while
 AgentAllReplicasDown fires, the per-pod and SLO warnings are suppressed, and
-AgentHighErrorRate suppresses the budget-burn warning it implies. On AWS the same SLO is expressed as CloudWatch alarms on
-ALB metrics.
+AgentHighErrorRate suppresses the budget-burn warning it implies. On AWS the
+same SLO is expressed as CloudWatch alarms on ALB metrics.
+
+---
+
+## Found while running it
+
+Bugs that only showed up on a real cluster, and what now prevents them:
+
+- **Silent label collision.** The app's metrics first used a label called
+  `endpoint`. The Prometheus Operator adds its own `endpoint` target label
+  (the scrape port name), so Prometheus renamed the app's label to
+  `exported_endpoint`, and every alert and panel filtering on
+  `endpoint="/agent"` matched nothing: dashboards said "No data", and alerts
+  stayed green during a 30 % error drill. The label is now `handler`; a unit
+  test fails if a metric uses a reserved target label, and the alert tests
+  feed series with the operator's labels attached.
+- **Hijacked CI action.** The `aquasecurity/trivy-action` tags were
+  compromised in March 2026 (GHSA-69fq-xp46-6x23). CI now downloads a pinned
+  Trivy binary and verifies its SHA-256, and every action is pinned to a
+  commit SHA, so a moved tag cannot change what runs.
+- **Duplicate panel query IDs.** Two queries with the same refId made the
+  latency panel show nothing; each query now has its own ID.
 
 ---
 
@@ -259,7 +389,9 @@ These are the next steps, not oversights:
   (`terraform apply -target=module.service.aws_ecr_repository.this` once).
 - **Local:** Loki uses `loki-stack` with filesystem storage and Prometheus
   keeps 6 h of data. Production would use the `grafana/loki` chart with object
-  storage, Alloy instead of Promtail, and longer retention. Grafana's admin
+  storage, Alloy instead of Promtail, and longer retention. Because that Loki
+  is older than Grafana, the "Logs volume" bar in Explore shows a parse error;
+  the log lines and dashboard panels are unaffected. Grafana's admin
   password is `admin`.
 - **App:** Bedrock calls are mocked (`MOCK_LLM=true`); `/ready` does not yet
   check Postgres/Redis.
