@@ -15,18 +15,18 @@ spec:
       rules:
         - record: agentic_gp:agent_error_ratio:rate5m
           expr: |
-            sum(rate(agent_requests_total{job="agentic-gp",endpoint="/agent",status=~"5.."}[5m]))
+            sum(rate(agent_requests_total{job="agentic-gp",handler="/agent",status=~"5.."}[5m]))
             /
-            sum(rate(agent_requests_total{job="agentic-gp",endpoint="/agent"}[5m]))
+            sum(rate(agent_requests_total{job="agentic-gp",handler="/agent"}[5m]))
         - record: agentic_gp:agent_error_ratio:rate1h
           expr: |
-            sum(rate(agent_requests_total{job="agentic-gp",endpoint="/agent",status=~"5.."}[1h]))
+            sum(rate(agent_requests_total{job="agentic-gp",handler="/agent",status=~"5.."}[1h]))
             /
-            sum(rate(agent_requests_total{job="agentic-gp",endpoint="/agent"}[1h]))
+            sum(rate(agent_requests_total{job="agentic-gp",handler="/agent"}[1h]))
         - record: agentic_gp:agent_latency_p95:rate5m
           expr: |
             histogram_quantile(0.95,
-              sum by (le) (rate(agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent"}[5m])))
+              sum by (le) (rate(agent_request_latency_seconds_bucket{job="agentic-gp",handler="/agent"}[5m])))
 
     # --- availability: are the pods there at all? -------------------------
     - name: agentic-gp.availability

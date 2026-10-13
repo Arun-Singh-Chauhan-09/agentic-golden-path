@@ -44,11 +44,15 @@ QUIET_PATHS = {"/health", "/ready", "/metrics"}  # probes/scrapes: not logged
 
 app = FastAPI(title="agentic-golden-path demo", version=APP_VERSION)
 
-REQUESTS = Counter("agent_requests_total", "Total HTTP requests", ["endpoint", "status"])
+# Label is "handler", not "endpoint": the Prometheus Operator adds its own
+# target label called "endpoint" (the scrape port name), and on a clash
+# Prometheus renames the app's label to "exported_endpoint", silently
+# breaking every query that filters on it.
+REQUESTS = Counter("agent_requests_total", "Total HTTP requests", ["handler", "status"])
 LATENCY = Histogram(
     "agent_request_latency_seconds",
     "Request latency",
-    ["endpoint"],
+    ["handler"],
     buckets=(0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.5, 5.0),
 )
 # Constant 1, labelled with the running version: shows in Grafana which
@@ -67,7 +71,7 @@ def _env_float(name: str, default: float) -> float:
 @app.middleware("http")
 async def observe(request: Request, call_next):
     """Count, time and log every request in one place."""
-    endpoint = request.url.path if request.url.path in KNOWN_PATHS else "other"
+    handler = request.url.path if request.url.path in KNOWN_PATHS else "other"
     start = time.perf_counter()
     status = 500
     try:
@@ -76,10 +80,10 @@ async def observe(request: Request, call_next):
         return response
     finally:
         elapsed = time.perf_counter() - start
-        REQUESTS.labels(endpoint, str(status)).inc()
-        if endpoint != "/metrics":
-            LATENCY.labels(endpoint).observe(elapsed)
-        if endpoint not in QUIET_PATHS:
+        REQUESTS.labels(handler, str(status)).inc()
+        if handler != "/metrics":
+            LATENCY.labels(handler).observe(elapsed)
+        if handler not in QUIET_PATHS:
             # One JSON object per line on stdout: the platform (Promtail ->
             # Loki) collects it; the app never manages log files.
             print(

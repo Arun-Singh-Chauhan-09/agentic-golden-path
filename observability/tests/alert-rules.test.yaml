@@ -17,11 +17,11 @@ tests:
         values: '1x80'
       - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p2"}'
         values: '1x80'
-      - series: 'agent_requests_total{job="agentic-gp",endpoint="/agent",status="200"}'
+      - series: 'agent_requests_total{job="agentic-gp",endpoint="http",handler="/agent",status="200"}'
         values: '0+75x80'
-      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="0.25"}'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="http",handler="/agent",le="0.25"}'
         values: '0+75x80'
-      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="+Inf"}'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="http",handler="/agent",le="+Inf"}'
         values: '0+75x80'
     alert_rule_test:
       - {eval_time: 15m, alertname: AgentHighErrorRate, exp_alerts: []}
@@ -35,9 +35,9 @@ tests:
     input_series:
       - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p1"}'
         values: '1x80'
-      - series: 'agent_requests_total{job="agentic-gp",endpoint="/agent",status="200"}'
+      - series: 'agent_requests_total{job="agentic-gp",endpoint="http",handler="/agent",status="200"}'
         values: '0+52x80'
-      - series: 'agent_requests_total{job="agentic-gp",endpoint="/agent",status="500"}'
+      - series: 'agent_requests_total{job="agentic-gp",endpoint="http",handler="/agent",status="500"}'
         values: '0+23x80'
     alert_rule_test:
       # Not yet: the 2-minute "for" has not elapsed.
@@ -62,11 +62,11 @@ tests:
     input_series:
       - series: 'up{job="agentic-gp",namespace="agentic-gp",pod="p1"}'
         values: '1x80'
-      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="1"}'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="http",handler="/agent",le="1"}'
         values: '0x80'
-      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="1.5"}'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="http",handler="/agent",le="1.5"}'
         values: '0+75x80'
-      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="/agent",le="+Inf"}'
+      - series: 'agent_request_latency_seconds_bucket{job="agentic-gp",endpoint="http",handler="/agent",le="+Inf"}'
         values: '0+75x80'
     alert_rule_test:
       - eval_time: 10m
@@ -80,7 +80,7 @@ tests:
   # chaos.sh outage: no pods, so no "up" series at all.
   - interval: 15s
     input_series:
-      - series: 'agent_requests_total{job="agentic-gp",endpoint="/agent",status="200"}'
+      - series: 'agent_requests_total{job="agentic-gp",endpoint="http",handler="/agent",status="200"}'
         values: '0x20'
     alert_rule_test:
       - {eval_time: 30s, alertname: AgentAllReplicasDown, exp_alerts: []}

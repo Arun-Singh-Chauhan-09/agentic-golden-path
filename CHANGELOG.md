@@ -6,6 +6,17 @@ and [Semantic Versioning](https://semver.org/). Releases are cut by pushing a
 image and moves the GitOps pointer.
 
 ## [Unreleased]
+### Fixed
+- Request metrics now use the label `handler` instead of `endpoint`. The
+  Prometheus Operator adds its own `endpoint` target label (the scrape port
+  name); on the clash Prometheus renamed the app's label to
+  `exported_endpoint`, so every SLO alert and dashboard panel filtering on
+  `endpoint="/agent"` silently matched nothing. A unit test now fails if a
+  metric uses any reserved target label, and the alert tests include the
+  operator's labels so a clash can't hide again.
+- `setup.sh` waits for port-forwards before reporting them unreachable;
+  `status.sh` works on Python 3.10.
+
 ### Security
 - Replaced `aquasecurity/trivy-action` with a pinned Trivy 0.69.3 binary whose
   SHA-256 is verified in CI. The action's tags were hijacked in March 2026

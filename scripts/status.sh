@@ -28,8 +28,14 @@ alerts = [a for a in json.load(sys.stdin)["data"]["alerts"]
 if not alerts:
     print("    none")
 for a in sorted(alerts, key=lambda a: a["state"]):
-    l = a["labels"]
-    print(f"    {a[\"state\"]:8} {l.get(\"severity\", \"-\"):8} {l[\"alertname\"]:28} {a[\"annotations\"].get(\"summary\", \"\")}")
+    labels = a["labels"]
+    # %-formatting, not f-strings: works on every Python 3 (Ubuntu 22.04 ships 3.10)
+    print("    %-8s %-8s %-28s %s" % (
+        a["state"],
+        labels.get("severity", "-"),
+        labels["alertname"],
+        a["annotations"].get("summary", ""),
+    ))
 '
 else
   info "Prometheus not reachable; re-run scripts/setup.sh to restart port-forwards"

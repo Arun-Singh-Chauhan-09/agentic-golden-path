@@ -153,7 +153,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "agentic_gp:agent_error_ratio:rate5m or (sum(rate(agent_requests_total{job=\"agentic-gp\",endpoint=\"/agent\",status=~\"5..\"}[5m])) / sum(rate(agent_requests_total{job=\"agentic-gp\",endpoint=\"/agent\"}[5m])))",
+          "expr": "agentic_gp:agent_error_ratio:rate5m or (sum(rate(agent_requests_total{job=\"agentic-gp\",handler=\"/agent\",status=~\"5..\"}[5m])) / sum(rate(agent_requests_total{job=\"agentic-gp\",handler=\"/agent\"}[5m])))",
           "legendFormat": "errors",
           "instant": true
         }
@@ -206,7 +206,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "1 - ((sum(increase(agent_requests_total{job=\"agentic-gp\",endpoint=\"/agent\",status=~\"5..\"}[$__range])) / sum(increase(agent_requests_total{job=\"agentic-gp\",endpoint=\"/agent\"}[$__range]))) / 0.005)",
+          "expr": "1 - ((sum(increase(agent_requests_total{job=\"agentic-gp\",handler=\"/agent\",status=~\"5..\"}[$__range])) / sum(increase(agent_requests_total{job=\"agentic-gp\",handler=\"/agent\"}[$__range]))) / 0.005)",
           "legendFormat": "budget",
           "instant": true
         }
@@ -238,7 +238,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (status) (rate(agent_requests_total{job=\"agentic-gp\",endpoint=\"/agent\"}[1m]))",
+          "expr": "sum by (status) (rate(agent_requests_total{job=\"agentic-gp\",handler=\"/agent\"}[1m]))",
           "legendFormat": "{{status}}"
         }
       ]
@@ -287,7 +287,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(agent_requests_total{job=\"agentic-gp\",endpoint=\"/agent\",status=~\"5..\"}[5m])) / sum(rate(agent_requests_total{job=\"agentic-gp\",endpoint=\"/agent\"}[5m]))",
+          "expr": "sum(rate(agent_requests_total{job=\"agentic-gp\",handler=\"/agent\",status=~\"5..\"}[5m])) / sum(rate(agent_requests_total{job=\"agentic-gp\",handler=\"/agent\"}[5m]))",
           "legendFormat": "error ratio"
         }
       ]
@@ -336,7 +336,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_request_latency_seconds_bucket{job=\"agentic-gp\",endpoint=\"/agent\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_request_latency_seconds_bucket{job=\"agentic-gp\",handler=\"/agent\"}[5m])))",
           "legendFormat": "p95"
         },
         {
@@ -345,7 +345,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(agent_request_latency_seconds_bucket{job=\"agentic-gp\",endpoint=\"/agent\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(agent_request_latency_seconds_bucket{job=\"agentic-gp\",handler=\"/agent\"}[5m])))",
           "legendFormat": "p50"
         }
       ]
@@ -376,7 +376,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (pod) (rate(agent_requests_total{job=\"agentic-gp\",endpoint=\"/agent\"}[1m]))",
+          "expr": "sum by (pod) (rate(agent_requests_total{job=\"agentic-gp\",handler=\"/agent\"}[1m]))",
           "legendFormat": "{{pod}}"
         }
       ]

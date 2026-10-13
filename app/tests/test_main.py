@@ -53,7 +53,7 @@ def test_failure_injection_returns_500_and_is_counted(monkeypatch):
     r = client.post("/agent", json={"prompt": "hi"})
     assert r.status_code == 500
     metrics = client.get("/metrics").text
-    assert 'agent_requests_total{endpoint="/agent",status="500"}' in metrics
+    assert 'agent_requests_total{handler="/agent",status="500"}' in metrics
 
 
 def test_extra_latency_is_applied(monkeypatch):
@@ -66,7 +66,7 @@ def test_extra_latency_is_applied(monkeypatch):
 def test_unknown_paths_do_not_create_new_labels():
     client.get("/wp-admin")
     metrics = client.get("/metrics").text
-    assert 'endpoint="other"' in metrics
+    assert 'handler="other"' in metrics
     assert "wp-admin" not in metrics
 
 
@@ -86,3 +86,21 @@ def test_probes_are_not_logged(capsys):
 def test_build_info_metric_exposes_version():
     metrics = client.get("/metrics").text
     assert 'agent_build_info{version="' in metrics
+
+
+# Labels Prometheus (and the Prometheus Operator) attach to every scraped
+# series. If the app used one, Prometheus would rename it to exported_<name>
+# and every dashboard and alert filtering on it would silently match nothing.
+RESERVED_TARGET_LABELS = {"job", "instance", "namespace", "pod", "service", "endpoint", "container"}
+
+
+def test_metrics_do_not_use_reserved_target_labels():
+    client.post("/agent", json={"prompt": "hi"})
+    used = set()
+    for line in client.get("/metrics").text.splitlines():
+        if line.startswith("agent_") and "{" in line:
+            labels = line[line.index("{") + 1 : line.index("}")]
+            used |= {pair.split("=")[0] for pair in labels.split(",") if "=" in pair}
+    assert used, "expected labelled agent_* metrics"
+    clash = used & RESERVED_TARGET_LABELS
+    assert not clash, f"reserved Prometheus label used: {clash}"

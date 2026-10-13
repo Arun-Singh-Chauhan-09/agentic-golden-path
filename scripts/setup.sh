@@ -129,7 +129,13 @@ else
   info "app not reachable on localhost:${APP_PORT} yet; check: kubectl --context $CTX -n $NS get pods"
 fi
 for pair in "$GRAFANA_PORT:Grafana" "$PROM_PORT:Prometheus" "$ALERTMANAGER_PORT:Alertmanager"; do
-  if port_in_use "${pair%%:*}"; then
+  # kubectl port-forward needs a moment to open its port: retry up to 15s.
+  up=0
+  for _ in $(seq 1 15); do
+    if port_in_use "${pair%%:*}"; then up=1; break; fi
+    sleep 1
+  done
+  if [ "$up" = "1" ]; then
     info "${pair##*:} listening on ${pair%%:*}"
   else
     info "${pair##*:} NOT reachable on ${pair%%:*}"
