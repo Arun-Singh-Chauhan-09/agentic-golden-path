@@ -25,7 +25,7 @@ labels:
 images:
   - name: agentic-gp
     newName: ghcr.io/arun-singh-chauhan-09/agentic-golden-path
-    newTag: 0.2.0
+    newTag: 0.3.0
 
 # Grafana's sidecar picks up any ConfigMap labelled grafana_dashboard=1,
 # so the dashboard ships with the app instead of being clicked together.
